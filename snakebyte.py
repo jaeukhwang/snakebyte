@@ -106,43 +106,88 @@ class SnakeGame:
             self.snake.pop()
 
 
-def draw(stdscr: curses.window, game: SnakeGame) -> None:
+def safe_addstr(stdscr: curses.window, y: int, x: int, text: str, attr: int = 0) -> None:
+    max_y, max_x = stdscr.getmaxyx()
+    if y < 0 or y >= max_y or x >= max_x:
+        return
+
+    if x < 0:
+        text = text[-x:]
+        x = 0
+
+    if not text:
+        return
+
+    allowed = max_x - x
+    if allowed <= 0:
+        return
+
+    clipped = text[:allowed]
+    try:
+        stdscr.addstr(y, x, clipped, attr)
+    except curses.error:
+        # 터미널 리사이즈 순간 발생할 수 있는 addstr 에러를 무시
+        pass
+
+
+def draw_too_small(stdscr: curses.window, max_y: int, max_x: int) -> None:
+    required_y = BOARD_HEIGHT + 5
+    required_x = BOARD_WIDTH + 2
     stdscr.erase()
+    safe_addstr(stdscr, 0, 0, "Terminal window is too small for snakebyte.")
+    safe_addstr(stdscr, 1, 0, f"Current: {max_x}x{max_y}, Required: {required_x}x{required_y}")
+    safe_addstr(stdscr, 2, 0, "Resize terminal or reduce font size.")
+    safe_addstr(stdscr, 3, 0, "Press q to quit.")
+    stdscr.refresh()
+
+
+def draw(stdscr: curses.window, game: SnakeGame) -> bool:
+    stdscr.erase()
+    max_y, max_x = stdscr.getmaxyx()
+
+    required_y = BOARD_HEIGHT + 5
+    required_x = BOARD_WIDTH + 2
+    if max_y < required_y or max_x < required_x:
+        draw_too_small(stdscr, max_y, max_x)
+        return False
 
     # GR 느낌의 사각형 화면 테두리
     top = "+" + "-" * BOARD_WIDTH + "+"
     bottom = top
-    stdscr.addstr(0, 0, top)
+    safe_addstr(stdscr, 0, 0, top)
     for row in range(1, BOARD_HEIGHT + 1):
-        stdscr.addstr(row, 0, "|")
-        stdscr.addstr(row, BOARD_WIDTH + 1, "|")
-    stdscr.addstr(BOARD_HEIGHT + 1, 0, bottom)
+        safe_addstr(stdscr, row, 0, "|")
+        safe_addstr(stdscr, row, BOARD_WIDTH + 1, "|")
+    safe_addstr(stdscr, BOARD_HEIGHT + 1, 0, bottom)
 
     # 점(먹이)
-    stdscr.addstr(game.dot.y, game.dot.x, ".")
+    safe_addstr(stdscr, game.dot.y, game.dot.x, ".")
 
     # 뱀 머리/몸
     head = game.snake[0]
-    stdscr.addstr(head.y, head.x, "@")
+    safe_addstr(stdscr, head.y, head.x, "@")
     for segment in game.snake[1:]:
-        stdscr.addstr(segment.y, segment.x, "#")
+        safe_addstr(stdscr, segment.y, segment.x, "#")
 
-    stdscr.addstr(
+    safe_addstr(
+        stdscr,
         BOARD_HEIGHT + 3,
         0,
         f"Score: {game.score}  Length: {len(game.snake)}  Controls: i/m/j/k, q=quit",
     )
 
     if game.game_over:
-        stdscr.addstr(
+        safe_addstr(
+            stdscr,
             BOARD_HEIGHT // 2,
             max(2, (BOARD_WIDTH // 2) - 6),
             " GAME OVER ",
             curses.A_REVERSE,
         )
-        stdscr.addstr(BOARD_HEIGHT + 4, 0, "Press r to restart or q to quit")
+        safe_addstr(stdscr, BOARD_HEIGHT + 4, 0, "Press r to restart or q to quit")
 
     stdscr.refresh()
+    return True
 
 
 def run(stdscr: curses.window) -> None:
@@ -166,12 +211,13 @@ def run(stdscr: curses.window) -> None:
         if key in KEY_TO_DIRECTION and not game.game_over:
             game.turn(KEY_TO_DIRECTION[key])
 
+        rendered = draw(stdscr, game)
+
         now = time.monotonic()
-        if now - last_tick >= FRAME_DELAY:
+        if rendered and now - last_tick >= FRAME_DELAY:
             game.tick()
             last_tick = now
 
-        draw(stdscr, game)
         time.sleep(0.01)
 
 
