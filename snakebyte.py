@@ -75,6 +75,10 @@ class SnakeGame:
         if new_direction != OPPOSITE_DIRECTION[self.direction]:
             self.next_direction = new_direction
 
+
+    def is_wall_food(self, p: Point) -> bool:
+        return p.x in (0, GRID_SIZE - 1) or p.y in (0, GRID_SIZE - 1)
+
     def tick(self) -> None:
         if self.game_over:
             return
@@ -95,7 +99,12 @@ class SnakeGame:
 
         self.snake.insert(0, new_head)
         if new_head == self.dot:
-            self.score += 1
+            if self.is_wall_food(self.dot):
+                if len(self.snake) > 1:
+                    self.snake.pop()
+                self.score += 1
+            else:
+                self.score += 1
             self.dot = self.spawn_dot()
         else:
             self.snake.pop()
@@ -156,8 +165,9 @@ class SnakeApp:
         for x in range(0, GRID_SIZE * CELL_SIZE, CELL_SIZE):
             self.canvas.create_line(x, 0, x, GRID_SIZE * CELL_SIZE, fill="#111111")
 
-        # food
-        self.canvas.create_rectangle(*self.grid_to_px(self.game.dot), fill="#00FF66", outline="")
+        # food (wall-adjacent penalty food: red)
+        dot_color = "#FF4444" if self.game.is_wall_food(self.game.dot) else "#00FF66"
+        self.canvas.create_rectangle(*self.grid_to_px(self.game.dot), fill=dot_color, outline="")
 
         # snake
         head = self.game.snake[0]
