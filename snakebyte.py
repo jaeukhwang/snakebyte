@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Terminal Snake game inspired by Apple ][ GR-style block graphics.
+"""Apple ][ GR-style 40x40 matrix Snake game in a dedicated window.
 
 Controls:
   i = up
@@ -11,9 +11,8 @@ Controls:
 
 from __future__ import annotations
 
-import curses
 import random
-import time
+import tkinter as tk
 from dataclasses import dataclass
 
 
@@ -23,10 +22,10 @@ class Point:
     x: int
 
 
-BOARD_WIDTH = 40
-BOARD_HEIGHT = 24
+GRID_SIZE = 40
+CELL_SIZE = 12
 INITIAL_LENGTH = 3
-FRAME_DELAY = 0.12
+FRAME_DELAY_MS = 120
 
 UP = Point(-1, 0)
 DOWN = Point(1, 0)
@@ -34,10 +33,10 @@ LEFT = Point(0, -1)
 RIGHT = Point(0, 1)
 
 KEY_TO_DIRECTION = {
-    ord("i"): UP,
-    ord("m"): DOWN,
-    ord("j"): LEFT,
-    ord("k"): RIGHT,
+    "i": UP,
+    "m": DOWN,
+    "j": LEFT,
+    "k": RIGHT,
 }
 
 OPPOSITE_DIRECTION = {
@@ -50,25 +49,24 @@ OPPOSITE_DIRECTION = {
 
 class SnakeGame:
     def __init__(self) -> None:
-        mid_y = BOARD_HEIGHT // 2
-        mid_x = BOARD_WIDTH // 2
+        mid = GRID_SIZE // 2
         self.snake: list[Point] = [
-            Point(mid_y, mid_x),
-            Point(mid_y, mid_x - 1),
-            Point(mid_y, mid_x - 2),
+            Point(mid, mid),
+            Point(mid, mid - 1),
+            Point(mid, mid - 2),
         ]
         self.direction = RIGHT
         self.next_direction = RIGHT
         self.score = 0
-        self.dot = self._spawn_dot()
+        self.dot = self.spawn_dot()
         self.game_over = False
 
-    def _spawn_dot(self) -> Point:
+    def spawn_dot(self) -> Point:
         snake_cells = set(self.snake)
         candidates = [
             Point(y, x)
-            for y in range(1, BOARD_HEIGHT + 1)
-            for x in range(1, BOARD_WIDTH + 1)
+            for y in range(GRID_SIZE)
+            for x in range(GRID_SIZE)
             if Point(y, x) not in snake_cells
         ]
         return random.choice(candidates)
@@ -86,143 +84,113 @@ class SnakeGame:
         new_head = Point(head.y + self.direction.y, head.x + self.direction.x)
 
         if (
-            new_head.x < 1
-            or new_head.x > BOARD_WIDTH
-            or new_head.y < 1
-            or new_head.y > BOARD_HEIGHT
+            new_head.x < 0
+            or new_head.x >= GRID_SIZE
+            or new_head.y < 0
+            or new_head.y >= GRID_SIZE
+            or new_head in self.snake
         ):
-            self.game_over = True
-            return
-
-        if new_head in self.snake:
             self.game_over = True
             return
 
         self.snake.insert(0, new_head)
         if new_head == self.dot:
             self.score += 1
-            self.dot = self._spawn_dot()
+            self.dot = self.spawn_dot()
         else:
             self.snake.pop()
 
 
-def safe_addstr(stdscr: curses.window, y: int, x: int, text: str, attr: int = 0) -> None:
-    max_y, max_x = stdscr.getmaxyx()
-    if y < 0 or y >= max_y or x >= max_x:
-        return
+class SnakeApp:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.root.title("snakebyte - Apple ][ GR 40x40")
+        self.root.resizable(False, False)
 
-    if x < 0:
-        text = text[-x:]
-        x = 0
+        canvas_px = GRID_SIZE * CELL_SIZE
+        self.canvas = tk.Canvas(root, width=canvas_px, height=canvas_px, bg="black", highlightthickness=0)
+        self.canvas.pack(padx=10, pady=(10, 4))
 
-    if not text:
-        return
+        self.info_label = tk.Label(root, text="", font=("Courier", 11), anchor="w")
+        self.info_label.pack(fill="x", padx=10, pady=(0, 2))
 
-    allowed = max_x - x
-    if allowed <= 0:
-        return
+        self.help_label = tk.Label(root, text="Controls: i/m/j/k, q=quit, r=restart", font=("Courier", 10), anchor="w")
+        self.help_label.pack(fill="x", padx=10, pady=(0, 10))
 
-    clipped = text[:allowed]
-    try:
-        stdscr.addstr(y, x, clipped, attr)
-    except curses.error:
-        # 터미널 리사이즈 순간 발생할 수 있는 addstr 에러를 무시
-        pass
+        self.game = SnakeGame()
 
+        self.root.bind("<KeyPress>", self.on_key)
+        self.running = True
+        self.draw()
+        self.loop()
 
-def draw_too_small(stdscr: curses.window, max_y: int, max_x: int) -> None:
-    required_y = BOARD_HEIGHT + 5
-    required_x = BOARD_WIDTH + 2
-    stdscr.erase()
-    safe_addstr(stdscr, 0, 0, "Terminal window is too small for snakebyte.")
-    safe_addstr(stdscr, 1, 0, f"Current: {max_x}x{max_y}, Required: {required_x}x{required_y}")
-    safe_addstr(stdscr, 2, 0, "Resize terminal or reduce font size.")
-    safe_addstr(stdscr, 3, 0, "Press q to quit.")
-    stdscr.refresh()
+    def on_key(self, event: tk.Event) -> None:
+        key = event.keysym.lower()
 
+        if key == "q":
+            self.running = False
+            self.root.destroy()
+            return
 
-def draw(stdscr: curses.window, game: SnakeGame) -> bool:
-    stdscr.erase()
-    max_y, max_x = stdscr.getmaxyx()
+        if key == "r" and self.game.game_over:
+            self.game = SnakeGame()
+            self.draw()
+            return
 
-    required_y = BOARD_HEIGHT + 5
-    required_x = BOARD_WIDTH + 2
-    if max_y < required_y or max_x < required_x:
-        draw_too_small(stdscr, max_y, max_x)
-        return False
+        if key in KEY_TO_DIRECTION and not self.game.game_over:
+            self.game.turn(KEY_TO_DIRECTION[key])
 
-    # GR 느낌의 사각형 화면 테두리
-    top = "+" + "-" * BOARD_WIDTH + "+"
-    bottom = top
-    safe_addstr(stdscr, 0, 0, top)
-    for row in range(1, BOARD_HEIGHT + 1):
-        safe_addstr(stdscr, row, 0, "|")
-        safe_addstr(stdscr, row, BOARD_WIDTH + 1, "|")
-    safe_addstr(stdscr, BOARD_HEIGHT + 1, 0, bottom)
+    def grid_to_px(self, p: Point) -> tuple[int, int, int, int]:
+        x0 = p.x * CELL_SIZE
+        y0 = p.y * CELL_SIZE
+        x1 = x0 + CELL_SIZE
+        y1 = y0 + CELL_SIZE
+        return x0, y0, x1, y1
 
-    # 점(먹이)
-    safe_addstr(stdscr, game.dot.y, game.dot.x, ".")
+    def draw(self) -> None:
+        self.canvas.delete("all")
 
-    # 뱀 머리/몸
-    head = game.snake[0]
-    safe_addstr(stdscr, head.y, head.x, "@")
-    for segment in game.snake[1:]:
-        safe_addstr(stdscr, segment.y, segment.x, "#")
+        # Apple ][ GR 느낌: 검은 바탕 + 단색 블록
+        for y in range(0, GRID_SIZE * CELL_SIZE, CELL_SIZE):
+            self.canvas.create_line(0, y, GRID_SIZE * CELL_SIZE, y, fill="#111111")
+        for x in range(0, GRID_SIZE * CELL_SIZE, CELL_SIZE):
+            self.canvas.create_line(x, 0, x, GRID_SIZE * CELL_SIZE, fill="#111111")
 
-    safe_addstr(
-        stdscr,
-        BOARD_HEIGHT + 3,
-        0,
-        f"Score: {game.score}  Length: {len(game.snake)}  Controls: i/m/j/k, q=quit",
-    )
+        # food
+        self.canvas.create_rectangle(*self.grid_to_px(self.game.dot), fill="#00FF66", outline="")
 
-    if game.game_over:
-        safe_addstr(
-            stdscr,
-            BOARD_HEIGHT // 2,
-            max(2, (BOARD_WIDTH // 2) - 6),
-            " GAME OVER ",
-            curses.A_REVERSE,
-        )
-        safe_addstr(stdscr, BOARD_HEIGHT + 4, 0, "Press r to restart or q to quit")
+        # snake
+        head = self.game.snake[0]
+        self.canvas.create_rectangle(*self.grid_to_px(head), fill="#FFFFFF", outline="")
+        for seg in self.game.snake[1:]:
+            self.canvas.create_rectangle(*self.grid_to_px(seg), fill="#33AAFF", outline="")
 
-    stdscr.refresh()
-    return True
+        status = f"Score: {self.game.score}   Length: {len(self.game.snake)}"
+        if self.game.game_over:
+            status += "   GAME OVER (r=restart)"
+            self.canvas.create_text(
+                GRID_SIZE * CELL_SIZE // 2,
+                GRID_SIZE * CELL_SIZE // 2,
+                text="GAME OVER",
+                fill="#FF5555",
+                font=("Courier", 26, "bold"),
+            )
+        self.info_label.config(text=status)
 
+    def loop(self) -> None:
+        if not self.running:
+            return
 
-def run(stdscr: curses.window) -> None:
-    curses.curs_set(0)
-    stdscr.nodelay(True)
-    stdscr.timeout(0)
-
-    game = SnakeGame()
-    last_tick = time.monotonic()
-
-    while True:
-        key = stdscr.getch()
-
-        if key == ord("q"):
-            break
-
-        if game.game_over and key == ord("r"):
-            game = SnakeGame()
-            last_tick = time.monotonic()
-
-        if key in KEY_TO_DIRECTION and not game.game_over:
-            game.turn(KEY_TO_DIRECTION[key])
-
-        rendered = draw(stdscr, game)
-
-        now = time.monotonic()
-        if rendered and now - last_tick >= FRAME_DELAY:
-            game.tick()
-            last_tick = now
-
-        time.sleep(0.01)
+        if not self.game.game_over:
+            self.game.tick()
+        self.draw()
+        self.root.after(FRAME_DELAY_MS, self.loop)
 
 
 def main() -> None:
-    curses.wrapper(run)
+    root = tk.Tk()
+    SnakeApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
